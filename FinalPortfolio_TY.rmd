@@ -1,0 +1,264 @@
+---
+title: "Hiphop Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: column
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r libraries, include=FALSE}
+# Load libraries
+library(httr)
+library(jsonlite)
+library(tidyverse)
+library(magrittr)
+library(flexdashboard)
+library(lubridate)
+library(ggforce)
+library(ggplot2)
+library(cluster)
+library(dbscan)
+library(caret)
+library(e1071)
+library(dplyr)
+library(tuneR)
+library(seewave)
+
+#there are a lot of libraries and lines of code which are useless, but I kept them here because I did not want to "break" me dashboard. I tried to compare this playlist with my other hiphop playlist (all newer songs), but could not get it to work as I wanted which created a lot of mess, both visual and in what I was looking for. I also tried to create "cluster" based on year released, but when I did that my whole dashboard could work anymore so I deleted most of the code but kept some, because again I did not want to mess it up further. I also kept the second playlist daya in case of a resit.
+
+# Access the Spotify API
+client_id <- "3b10e6d1bcae4ded910f9e311b861087"
+client_secret <- "fe30f35f80384ca2851353cefffa9f01"
+token_url <- "https://accounts.spotify.com/api/token"
+
+auth_token <- POST(token_url,
+                  authenticate(client_id, client_secret),
+                  body = list(grant_type = "client_credentials"),
+                  encode = "form")
+
+token <- content(auth_token)$access_token
+
+# Retrieve the data
+playlist_id <- "1c2XZ1mY40deSOH7ukWlpe"
+playlist_url <- paste0("https://api.spotify.com/v1/playlists/", playlist_id)
+
+playlist_response <- GET(playlist_url,
+                         add_headers(Authorization = paste("Bearer", token)))
+
+playlist_data <- content(playlist_response)
+
+track_ids <- playlist_data$tracks$items %>% map_chr(~ .$track$id)
+
+playlist_id_2 <- "0wRsNy4Jkv7rd4y3pnNsMg"
+playlist_url_2 <- paste0("https://api.spotify.com/v1/playlists/", playlist_id_2)
+
+playlist_response_2 <- GET(playlist_url_2,
+                         add_headers(Authorization = paste("Bearer", token)))
+
+playlist_data_2 <- content(playlist_response_2)
+
+track_ids_2 <- playlist_data_2$tracks$items %>% map_chr(~ .$track$id)
+
+# Process and analyze the data
+track_features_url <- "https://api.spotify.com/v1/audio-features"
+
+track_features_response <- GET(track_features_url,
+                               add_headers(Authorization = paste("Bearer", token)),
+                               query = list(ids = paste(track_ids, collapse = ",")))
+
+track_features_data <- content(track_features_response)$audio_features
+
+# Prepare data for the dashboard
+track_release_years <- playlist_data$tracks$items %>% map_chr(~ .$track$album$release_date)
+
+track_data <- as.data.frame(do.call(rbind, track_features_data))
+track_data$release_year <- track_release_years[1:nrow(track_data)]
+
+track_data$release_year <- as.numeric(substr(track_data$release_year, 1, 4))
+track_data$decade <- floor(track_data$release_year / 10) * 10
+
+track_data$tempo <- as.numeric(track_data$tempo)
+track_data <- track_data %>% drop_na()
+
+track_features_response_2 <- GET(track_features_url,
+                               add_headers(Authorization = paste("Bearer", token)),
+                               query = list(ids = paste(track_ids_2, collapse = ",")))
+
+track_features_data_2 <- content(track_features_response_2)$audio_features
+
+track_release_years_2 <- playlist_data_2$tracks$items %>% map_chr(~ .$track$album$release_date)
+
+track_data_2 <- as.data.frame(do.call(rbind, track_features_data_2))
+track_data_2$release_year <- track_release_years_2[1:nrow(track_data_2)]
+
+track_data_2$release_year <- as.numeric(substr(track_data_2$release_year, 1, 4))
+track_data_2$tempo <- as.numeric(track_data_2$tempo)
+track_data_2$danceability <- as.numeric(track_data_2$danceability)
+track_data_2$energy <- as.numeric(track_data_2$energy)
+track_data_2$loudness <- as.numeric(track_data_2$loudness)
+track_data_2 <- track_data_2 %>% drop_na()
+
+# Create the tempo chart
+tempo_chart <- ggplot(track_data, aes(x = "", y = tempo)) +
+  geom_violin(fill = "blue", alpha = 0.7, adjust = 0.2) +
+  labs(title = "Tempo Distribution",
+       x = "", y = "Tempo (BPM)") +
+  theme_minimal()
+
+tempo_chart_2 <- ggplot(track_data_2, aes(x = "", y = tempo)) +
+  geom_violin(fill = "blue", alpha = 0.7, adjust = 0.2) +
+  labs(title = "Tempo Distribution for Playlist 2",
+       x = "", y = "Tempo (BPM)") +
+  theme_minimal()
+
+# Convert danceability, energy, and loudness to numeric format
+track_data$danceability <- as.numeric(track_data$danceability)
+track_data$energy <- as.numeric(track_data$energy)
+track_data$loudness <- as.numeric(track_data$loudness)
+
+# Boxplot for danceability
+danceability_boxplot <- ggplot(track_data, aes(x = "", y = danceability)) +
+  geom_boxplot(fill = "blue", alpha = 0.7) +
+  labs(title = "Danceability Boxplot",
+       x = "", y = "Danceability") +
+  theme_minimal()
+
+# Boxplot for energy
+energy_boxplot <- ggplot(track_data, aes(x = "", y = energy)) +
+  geom_boxplot(fill = "red", alpha = 0.7) +
+  labs(title = "Energy Boxplot",
+       x = "", y = "Energy") +
+  theme_minimal()
+
+# Boxplot for loudness
+loudness_boxplot <- ggplot(track_data, aes(x = "", y = loudness)) +
+  geom_boxplot(fill = "green", alpha = 0.7) +
+  labs(title = "Loudness Boxplot",
+       x = "", y = "Loudness (dB)") +
+  theme_minimal()
+
+# Print the boxplots
+print(danceability_boxplot)
+print(energy_boxplot)
+print(loudness_boxplot)
+
+# Create Russell's Circumplex Model of Affect plot
+track_data$valence <- as.numeric(track_data$valence)
+track_data$energy <- as.numeric(track_data$energy)
+track_data$tempo <- as.numeric(track_data$tempo)
+
+affect_data <- track_data %>%
+  select(valence, energy, tempo)
+
+affect_plot <- ggplot(affect_data, aes(x = valence, y = energy, size = tempo)) +
+  geom_point(alpha = 0.7) +
+  xlim(0, 1) +
+  ylim(0, 1) +
+  labs(x = "Valence",
+       y = "Energy",
+       size = "Tempo (BPM)") +
+  theme_minimal() +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
+  geom_hline(aes(yintercept = 0.5), linetype = "dashed", color = "gray") +
+  geom_vline(aes(xintercept = 0.5), linetype = "dashed", color = "gray")
+
+print(affect_plot)
+
+# Duration plot
+track_data$duration_ms <- as.numeric(track_data$duration_ms)
+
+duration_plot <- ggplot(track_data, aes(x = "", y = duration_ms / 1000)) +
+  geom_boxplot(fill = "orange", alpha = 0.7) +
+  labs(title = "Track Duration",
+       x = "", y = "Duration (seconds)") +
+  theme_minimal()
+
+print(duration_plot)
+
+
+```
+
+# Introduction
+
+I've chosen a playlist called "old skuul HipHop" which I created myself, soon after I created my Spotify account. It's called old skuul (old school) because it is a playlist full of my favorite Hip-Hop songs growing up as a kid/teenager. It consists of a variety of artist from a wide range of time (approximately from 1990 till 2010), and different forms of Hip-Hop, with the exclusion of my favorite Hip-Hop artist Eminem. That is because I created a different playlist with just his music.
+
+The playlist has a big variety of Hip-Hop songs for various reasons. The first reason is that since the songs all come from a different time, there are a lot of different artists, with most of the time just one song in this playlist. This is because I only add the ones I really liked when I listened to their music. Only the Big names such as Tupac, B.I.G, 50 Cent etc. have multiple songs in this playlist. All the songs are recorded, so no live performance in this playlist.
+
+I expect to find that all the songs are indeed from the same genre, and that there is a big probability that people who like one song, might like more songs from this playlist. The most typical songs in the playlist are: 50 Cent - In Da Club / Meek Mill - House Party / Lil Wayne Featuring Bruno Mars - Mirror.
+
+With this assignment I expect to learn more about the playlist I listen to very often, and will find out whether my assumptions regarding this playlist can be confirmed with the use of the Spotify Data. I expect to find out that the music is loud and energetic, but with a lot of "outliers" where quit a lot (approximately 25%) songs who are not within the range of the median, since Hiphop music has a lot of varations.
+
+# The tempo distribution
+
+## Column {data-width="750"}
+
+```{r}
+tempo_chart
+```
+
+## Column {data-width="250"}
+
+This violin plot shows the distribution of tempo for tracks in the entire playlist. The tempo distribution is continuous, with a peak around 95 BPM. This indicates that the majority of the songs in the playlist have a tempo close to 95 BPM, which is also the expected BPM for Hiphop songs (based on my findings on the internet). What stands out is that I expected tracks with a higher BPM, I did not expect songs with a BPM of 200! This is something I really did not expect, because from my own experience most songs feel like they are within the same tempo. However there are songs in this playlist which feel like "house" music, but I always assumed that this was the case because of the melody (which I associate with EDM).
+
+# The danceability / energy / loudness
+
+## row {data-width="300"}
+
+```{r}
+danceability_boxplot
+```
+
+**danceability_boxplot:** This boxplot illustrates the distribution of danceability scores for the tracks in the playlist. Danceability scores range from 0 (least danceable) to 1 (most danceable). The median danceability score is around 0.7, indicating that the majority of the tracks in the playlist have high danceability. The Boxplot for danceability has a quit small range (compared my other boxplots), which suggest that most songs fall within the "median" range. Suggesting that most songs in my playlist have a good danceability score, which is quit ironic, since I can't imagine dancing on most of the songs in my playslist.
+
+## row {data-width="300"}
+
+```{r}
+energy_boxplot
+```
+
+**energy_boxplot:** The energy boxplot shows the distribution of energy scores for the tracks in the playlist. Energy scores also range from 0 (least energetic) to 1 (most energetic). The median energy score is around 0.6, suggesting that the playlist contains tracks with moderate to high energy. In contrast with the danceablility boxplot, the energy boxplot has a bigger wider varation in energy levels. According to [Spotify:"Energy](Spotify:%22Energy){.uri} is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy." this is something I can relate to since there is a lot going on in the my old school Hiphop playlist, in terms of the pace most rappers "rap" in to sound more intimidating, or better said as a "Boss" (Meek Mill - I'm a boss).
+
+## row {data-width="300"}
+
+```{r}
+loudness_boxplot
+```
+
+**loudness_boxplot:** This boxplot displays the distribution of loudness values for the tracks in the playlist. Loudness is measured in decibels (dB). The median loudness value is around -6 dB, indicating that the playlist's tracks are relatively loud. The range of loudness values is also quite wide, suggesting a variety of loudness levels across the playlist. This is somewhat not surprising at all, because I like it when the music is loud with a strong base sound.
+
+# Energy, Valance and tempo
+
+## row {data-width="300"}
+
+```{r}
+affect_plot
+```
+
+affect_plot: The affect plot is based on the Russell's Circumplex Model of Affect, where each point represents a track with its valence and energy values on the x and y axes. The plot reveals that the majority of the tracks have moderate to high energy and valence scores. And according to Spotify Valance means the following:"A measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry)". This suggests that the playlist primarily consists of energetic and positive-sounding tracks. This is quit surprising since I would never assume that my playlist would be "positive' sounding tracks, because I mainly focus on the lyrics and the beat and the feeling the music gives me, which is energetic, but not necessarily positive. However, I did expect to see more songs with low energy, and seeing this made me realize that Hiphop (from my list) actually gives good"party vibes", and even though it uses explicit words in the song, it apparently has is way more positive then negative/angry.
+
+# Duration
+
+## row {data-width="300"}
+
+```{r}
+duration_plot
+```
+
+Duration_plot: The duration plot showcases the distribution of track lengths in the playlist. The boxplot reveals that most of the tracks have a duration ranging between 150 and 300 seconds, with a median duration around 210 seconds. What you can see as well is that there are a couple songs which have a duration that is more then double the median duration (Runaway - Kanye west = +500 seconds). But except from this outlier most songs are within the range where a songs duration is approximately 3 minutes.
+
+# Chroma
+
+## row {data-width="300"}
+
+```{r}
+
+```
+
+# Conclusion
+
+Having a great passion for music, but no musical knowledge at all made this assignment quite difficult but fun at the same time. Playing (more struggling) with the API and the data gave me a lot of insight in my own playlist which I still like to listen to today. I'm quit happy with the results I could generate except my problem with creating a matrix or chroma, which for some reason would not work for me. Which is of course my own fault because I started a bit to late with this assignment. But other then that I have learned a lot about working with R and visualizing the data collected from my own Spotify playlist with my taste of music.
+
+Before I started I assumed that the visuals would confirm what I expected from my expectations, which was true for some cases like danceablilty, tempo en energy. But at the same the I did not expect songs that would jump out so for from the median with the tempo. The most surprising finding for me was that my playlist can be seen as "positive", which I would never believe if I did to create the affect plot myself. This is probably because the lyrics in the songs are quit "dark" as in they are aggressive in the words they use (a lot of swearwords). But overall I think I've learned a lot about my taste in Hiphop.
+
+This playlist contains a lot of memories for me, because it contains music I grew up listening to, and still love to listen to today. The fact that I could have a deep dive into my own music, and learn about the music I love to listen to was really fun. Even though I struggled a lot with understanding the meaning of each terms was, since I had no background in music, I can say that I learned something which I never would have wouldn't it for this assignment. The only part what I did not like was the struggle I had with creating the dashboard, even though I did most of the data camp training, I couldn't get it as I would like. Had I more time, I would first fix the Timbre and chroma issue I had, and after the aesthetics of my dashboard, because I know that I wanted something better for a project I liked doing.
